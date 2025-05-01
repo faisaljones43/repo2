@@ -1,2 +1,7 @@
 /.env
 /mtind_venv/
+venv/
+__pycache__/
+*.pyc
+tmp/
+mtind_venv/
