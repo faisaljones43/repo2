@@ -112,4 +112,5 @@ async def main():
     print()
 
 if __name__ == "__main__":
+    print("Daniel didn't do this :[ ")
     asyncio.run(main())
