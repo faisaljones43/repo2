@@ -10,3 +10,5 @@ pymongo
 wikipedia
 tmdbv3api
 pandas 
+chromadb
+openai
