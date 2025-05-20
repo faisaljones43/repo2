@@ -33,13 +33,21 @@ class MovieVectorStore:
             print(f"🔄 Fetched & saved {len(movies)} movies to {movies_json}")
 
         seen, unique = set(), []
+        def is_valid_movie(m):
+            return (
+                m.get("title") and
+                m.get("overview") and
+                m.get("genre_ids") and
+                isinstance(m.get("genre_ids"), list) and
+                len(m.get("genre_ids")) > 0
+            )
         for m in movies:
-            mid = str(m["id"])
-            if mid not in seen:
+            mid = str(m["id"]) if "id" in m else None
+            if mid and mid not in seen and is_valid_movie(m):
                 seen.add(mid)
                 unique.append(m)
         movies = unique
-        print(f"🏷️  {len(movies)} unique movies after de-duplication")
+        print(f"🏷️  {len(movies)} unique, valid movies after de-duplication and filtering")
 
         self.id2movie = { str(m["id"]): m for m in movies }
 
@@ -69,7 +77,10 @@ class MovieVectorStore:
             metadatas=[
                     {
                         "id":           (m["id"]),
-                        "genre_ids":    str(m.get("genre_ids", [])),
+                        # Store genre_ids as comma-separated string for display
+                        "genre_ids":    ",".join(str(g) for g in m.get("genre_ids", [])),
+                        # Store primary genre as int for filtering
+                        "primary_genre_id": int(m["genre_ids"][0]) if m.get("genre_ids") and len(m["genre_ids"]) > 0 else None,
                         "release_year": (
                             int(str(m.get("release_date", "0000")).split("-")[0])
                             if m.get("release_date") else 0

@@ -4,7 +4,7 @@ import json
 from tmdb_clients   import fetch_movies, save_movies_to_file
 from vector_store   import MovieVectorStore
 
-CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_data")
+CHROMA_DIR = os.getenv("CHROMA_DIR", "./chroma_db")
 MOVIES_FILE = os.getenv("MOVIES_FILE", "movies.json")
 TMDB_PAGES = int(os.getenv("TMDB_PAGES", "5"))
 

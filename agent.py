@@ -20,9 +20,10 @@ QUESTIONS = [
     "What kind of mood? (e.g. lighthearted, intense, adventurous)",
     "Which decade do you prefer? (e.g. 1980s, 1990s, 2000s)",
     "Do you lean toward popular hits or hidden gems?",
-    "Any runtime preference? (e.g. < 90 min, 90–120 min, > 120 min)"
+    "Any runtime preference? (e.g. < 90 min, 90–120 min, > 120 min)",
+    "What country are you in for streaming services? (e.g. US, GB, DE)"
 ]
-KEYS = ["genre","mood","decade","popularity","runtime"]
+KEYS = ["genre","mood","decade","popularity","runtime","region"]
 tmdb = TMDb()
 tmdb_api_key = os.getenv("TMDB_API_KEY")
 discover = Discover()
@@ -34,7 +35,6 @@ class MoviePreferenceAgent:
         self.idx = len(self.prefs)
         self.store = MovieVectorStore(persist_dir="./chroma_db")
         genre_client = Genre()
-        discover = Discover()
         all_genres = genre_client.movie_list()
         self.genre_map = {g.name.lower(): g.id for g in all_genres}
         self.id_to_genre = {g.id: g.name for g in all_genres}
@@ -85,6 +85,11 @@ class MoviePreferenceAgent:
                 print("❗ Please use formats like '<90', '90-120', or '>120'")
                 return None
             return value
+        elif key == "region":
+            if not re.match(r"^[a-zA-Z]{2}$", value.upper()):
+                print("❗ Please enter a valid 2-letter country code (e.g. US, GB, DE)")
+                return None
+            return value.upper()
         return value
     def next_q(self):
         """Get next question or None if completed"""
@@ -125,13 +130,13 @@ class MoviePreferenceAgent:
             n = max(1, int(top_n))
         except ValueError:
             n = 5
-        # Build a Mongo‐style filter dict
         conditions: list[dict] = []
 
         genre = self.prefs.get("genre", "")
         gid = self.genre_map.get(genre.strip().lower())
         if gid:
-            conditions.append({"genre_ids": {"$in": [gid]}})
+            # Use primary_genre_id for filtering
+            conditions.append({"primary_genre_id": {"$eq": gid}})
         if not gid:
             return "I couldn’t find that genre—please try again."
         dec = decade.strip().lower()
@@ -146,16 +151,30 @@ class MoviePreferenceAgent:
         rt = runtime.replace(" ", "")
         rt_gte = rt_lte = None
         if "<" in rt:
-            rt_lte = int(rt.split("<")[-1].replace("min",""))
+            try:
+                rt_lte = int(rt.split("<")[-1].replace("min", ""))
+            except Exception:
+                pass
         elif ">" in rt:
-            rt_gte = int(rt.split(">")[-1].replace("min",""))
+            try:
+                rt_gte = int(rt.split(">")[-1].replace("min", ""))
+            except Exception:
+                pass
         elif "-" in rt:
-            low, high = rt.split("-")
-            rt_gte, rt_lte = int(low.replace("min","")), int(high.replace("min",""))
+            try:
+                low, high = rt.split("-")
+                rt_gte = int(low)
+                rt_lte = int(high)
+            except Exception:
+                pass
         if rt_gte is not None:
             conditions.append({"runtime": {"$gte": rt_gte}})
         if rt_lte is not None:
             conditions.append({"runtime": {"$lte": rt_lte}})
+
+        # Get region from preferences (default to 'US' if not set)
+        region = self.prefs.get("region", "US")
+        from tmdb_clients import get_movie_providers
 
         # 4) **One** call to search, with keywords
         filters = {"$and": conditions} if conditions else None
@@ -170,71 +189,66 @@ class MoviePreferenceAgent:
         output = []
         if hits:
             for hit in hits:
-                # hit["id"] is string—fetch full details
                 details = get_movie_details(int(hit["metadata"]["id"]))
                 if "error" in details:
                     continue
-                # metadata.genre_ids is already a list
-                genres = [self.id_to_genre.get(g, "Unknown") for g in hit["metadata"].get("genre_ids",[])]
-
-                year = (datetime.fromisoformat(details["release_date"])
-                        .year if details.get("release_date") else "N/A")
-
+                # genre_ids is a comma-separated string, convert to list of ints
+                genre_ids_str = hit["metadata"].get("genre_ids", "")
+                genre_ids = [int(g) for g in genre_ids_str.split(",") if g]
+                genres = [self.id_to_genre.get(g, "Unknown") for g in genre_ids]
+                year = (datetime.fromisoformat(details["release_date"]).year if details.get("release_date") else "N/A")
+                providers = get_movie_providers(details["id"], region)
+                provider_str = (
+                    f"Available on: {', '.join(providers)}" if providers else "No streaming info found."
+                )
                 output.append(
                     f"🎬 {details['title']} ({year})\n"
                     f"⭐ {details.get('vote_average', '?')}/10 | ⏳ {details.get('runtime','?')} mins\n"
                     f"🏷️ {', '.join(genres)}\n"
                     f"📖 {details.get('overview','No description')}\n"
+                    f"{provider_str}\n"
                 )
         else:
             sort_by = "popularity.desc"
-            if "hidden" in popularity.lower():
-                sort_by = "vote_average.desc"
+            if popularity and "hidden" in popularity.lower():
+                sort_by = "vote_average.asc"
 
             # Fallback: Use TMDb discover API
-            discover_params ={            
-            }
-            if genre:
-                gid = self.genre_map.get(genre.strip().lower())
-                if gid:
-                    discover_params["genre"] = gid
-                if not gid: 
-                    return "I couldn’t find that genre—please try again."
+            discover_params = {"sort_by": sort_by, "language": "en-US", "page": 1}
+            if gid:
+                discover_params["with_genres"] = str(gid)
             if decade:
-                if decade.endswith("s") and decade[:-1].isdigit():
-                    ys = int(decade[:-1])
-                    year_start, year_end = ys, ys + 9
-                    discover_params["primary_release_date.gte"] = f"{ys}-01-01"
-                    discover_params["primary_release_date.lte"] = f"{ys+9}-12-31"
-            if popularity and "hit" in popularity:
-                discover_params["sort_by"] = "popularity.desc"
-            #Runtime Filters
-            rt = runtime.replace(" ", "")
-            rt_gte = rt_lte = None
-            if "<" in rt:
-                rt_lte = int(rt.split("<")[-1].replace("min",""))
-            elif ">" in rt:
-                rt_gte = int(rt.split(">")[-1].replace("min",""))
-            elif "-" in rt:
-                low, high = rt.split("-")
-                rt_gte, rt_lte = int(low.replace("min","")), int(high.replace("min",""))
-            if rt_gte is not None:    
-                    
+                if year_start and year_end:
+                    discover_params["primary_release_date.gte"] = f"{year_start}-01-01"
+                    discover_params["primary_release_date.lte"] = f"{year_end}-12-31"
+            if rt_gte is not None:
+                discover_params["with_runtime.gte"] = rt_gte
+            if rt_lte is not None:
+                discover_params["with_runtime.lte"] = rt_lte
+
             # Call TMDb discover API
-                raw = list(discover.discover_movies(discover_params))[:n]
-            for movie in raw:
+            raw = list(discover.discover_movies(discover_params))
+            # Filter results to ensure genre match (sometimes TMDb returns loose matches)
+            filtered = [m for m in raw if gid in [g.id for g in getattr(m, 'genres', [])] or (hasattr(m, 'genre_ids') and gid in getattr(m, 'genre_ids', []))]
+            for m in filtered[:n]:
                 # Fetch full details to get runtime
-                details = get_movie_details(getattr(movie, 'id', None))
-                genres = [self.id_to_genre.get(g, "Unknown") for g in getattr(movie, 'genre_ids', [])]
-                release_date = getattr(movie, 'release_date', 'N/A')
+                details = get_movie_details(getattr(m, 'id', None))
+                genres = [self.id_to_genre.get(g, "Unknown") for g in getattr(m, 'genre_ids', [])]
+                release_date = getattr(m, 'release_date', 'N/A')
                 # Extract year if possible
                 year = release_date[:4] if release_date and len(release_date) >= 4 else "N/A"
-                runtime = details.get('runtime', None)
-                runtime_str = f"{runtime} mins" if runtime else "N/A"
+                runtime_val = details.get('runtime', None)
+                runtime_str = f"{runtime_val} mins" if runtime_val else "N/A"
+                # Fetch streaming providers for this movie and region
+                providers = get_movie_providers(details["id"], region)
+                provider_str = (
+                    f"Available on: {', '.join(providers)}" if providers else "No streaming info found."
+                )
                 output.append(
-                    f"\U0001F3AC {getattr(movie, 'title', '?')} ({year})\n"
-                    f"\u2B50 {getattr(movie, 'vote_average', '?')}/10 | \u23F3 {runtime_str}\n"
+                    f"\U0001F3AC {getattr(m, 'title', '?')} ({year})\n"
+                    f"\u2B50 {getattr(m, 'vote_average', '?')}/10 | \u23F3 {runtime_str}\n"
                     f"\U0001F3F7\uFE0F {', '.join(genres)}\n"
-                    f"\U0001F4D6 {getattr(movie, 'overview', 'No description')}\n"
+                    f"\U0001F4D6 {getattr(m, 'overview', 'No description')}\n"
+                    f"{provider_str}\n"
                 )
         return "\n".join(output) or "No recommendations found."

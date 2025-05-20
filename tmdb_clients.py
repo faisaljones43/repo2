@@ -72,12 +72,22 @@ def get_movie_details(movie_id: int) -> dict:
         }
     ).json()
     return {
+        "id": (resp["id"]),
         "title": resp.get("title"),
         "overview": resp.get("overview"),
         "release_date": resp.get("release_date"),
         "vote_average": resp.get("vote_average"),
         "runtime": resp.get("runtime", 0)  
     }
+
+def get_movie_providers(movie_id: int, region: str = "US") -> list:
+    """Fetch streaming providers for a movie in a given region (e.g. US, GB, DE)."""
+    url = f"{BASE_URL}/movie/{movie_id}/watch/providers"
+    resp = requests.get(url, params={"api_key": API_KEY}).json()
+    results = resp.get("results", {})
+    country = results.get(region.upper(), {})
+    flatrate = country.get("flatrate", [])
+    return [provider["provider_name"] for provider in flatrate]
 
 if __name__ == "__main__":
     save_movies_to_file()
