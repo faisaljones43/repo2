@@ -13,3 +13,5 @@ pandas
 chromadb
 openai
 tmdbv3api==1.7.7
+mem0ai
+autogen
