@@ -1,0 +1,28 @@
+How to Run the App
+Save the files: Create the files app.py, database.py, billing.py, and requirements.txt in a folder as described.
+Install dependencies: Open your terminal, navigate to that folder, and run:
+Generated bash
+pip install -r requirements.txt
+Use code with caution.
+Bash
+Run the Streamlit app: In the same terminal, run:
+Generated bash
+streamlit run app.py
+Use code with caution.
+Bash
+Your web browser should open with the application running.
+How to Use the App
+Seed Data: The app will automatically create three sample users (Jim, Pam, Dwight) the first time you run it.
+User Dashboard:
+Select a user from the dropdown.
+Click the "Scan to Check-In" button multiple times to simulate them visiting the gym on different days. You can run the app for several days to create a history.
+View their check-in history and any generated invoices.
+Admin Panel:
+Add a new user using the form.
+Run Billing: Click the "Run Monthly Billing Process" button. This will:
+Look at the previous full calendar month.
+Check each user's activity during that month.
+Apply the 20% penalty if they had a gap of 4 or more consecutive days without a check-in.
+Create an invoice record in the database.
+Display a summary of the invoices it just created.
+This prototype provides a solid foundation. For a real-world application, you would expand on this by integrating a real payment gateway (like Stripe), adding user authentication, and deploying it to a cloud server with a real cron job for the billing process.
